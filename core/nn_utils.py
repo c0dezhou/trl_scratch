@@ -4,6 +4,7 @@ import os
 import random
 import numpy as np
 import torch
+from typing import Optional
 
 def seed_everything(seed: int = 42) -> None:
     """固定随机数
@@ -22,15 +23,18 @@ def seed_everything(seed: int = 42) -> None:
     # 关闭“自动寻找最快算法”的机制
     torch.backends.cudnn.benchmark = False
 
-def get_device() -> torch.device:
+def get_device(device: Optional[str] = None) -> torch.device:
     """
     自动选择设备：
     - CUDA: gpu
     - MPS: mac
     - CPU
     """
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
+    if device:
+        return torch.device(device)
+    else:    
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
