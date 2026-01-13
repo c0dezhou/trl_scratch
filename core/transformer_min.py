@@ -156,7 +156,7 @@ class Block(nn.Module):
     x = LN(x + FFN(x))
     """
     def __init__(self, d_model:int, n_heads: int, d_ff: int, dropout: float=0.0):
-        super.__init__()
+        super().__init__()
         self.ln1 = LayerNorm(d_model)
         self.ln2 = LayerNorm(d_model)
         self.attn = MultiHeadSelfAttention(d_model, n_heads, dropout)
@@ -212,7 +212,7 @@ class MiniGPT(nn.Module):
             d_ff: int = 256,
             dropout: float = 0.0,
     ):
-        super.__init__()
+        super().__init__()
         
         self.vocab_size = vocab_size
         self.max_len = max_len

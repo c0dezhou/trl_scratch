@@ -1,0 +1,43 @@
+# --- 1. Python 运行环境与缓存 ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.env
+.pytest_cache/
+
+# --- 2. 深度学习相关 (最重要) ---
+# 排除掉所有保存的模型权重文件 (比如 .pth, .pt, .ckpt)
+*.pth
+*.pt
+*.ckpt
+*.h5
+# 排除掉保存的实验日志 (TensorBoard / WandB)
+runs/
+wandb/
+logs/
+
+# --- 3. 数据与资源 ---
+# 排除掉下载的数据集或处理后的数据
+data/
+datasets/
+*.csv
+*.jsonl
+*.npy
+*.npz
+
+# --- 4. 操作系统与编辑器 ---
+.DS_Store
+.vscode/
+.idea/
+.ipynb_checkpoints/
+*.swp
+
+# --- 5. 本地运行生成的输出 ---
+results/
+figures/
+*.png
+*.jpg
+*.mp4
