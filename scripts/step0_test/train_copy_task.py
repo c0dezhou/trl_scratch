@@ -118,18 +118,17 @@ def main():
 
         opt.zero_grad(set_to_none=True)
         loss.backward()
-
         # 如果梯度的范数超过 1.0，就强行把它缩小。这能防止模型在训练过程中“跑飞”（Loss 突然变成 NaN）。
         # 在 RL 训练中，这一行几乎是必加的，因为 RL 的信号极其不稳定。
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
 
-        if step % 200 == 0:
+        if step % 200 == 0: # 200step打印一下
             # 计算有效位置的准确率（t>=K）
             with torch.no_grad():
                 pred = logits.argmax(dim=-1)  # [B,T]
-                mask = (target != -100) # 找出哪些位置是有意义的
-                acc = (pred[mask] == target[mask]).float().mean().item()
+                mask = (target != -100) # 找出哪些位置是有意义的，待会儿比较的时候会压平成一维
+                acc = (pred[mask] == target[mask]).float().mean().item() # item（） 从tensor变成python 浮点数
             # 成功标准：如果 acc 达到了 95% 以上，说明 Causal Self-Attention 能够非常精准地在 T 维（时间轴）上定位到 t-K 的位置。
             print(f"step {step:4d} | loss {loss.item():.4f} | acc {acc*100:.1f}%")
 
