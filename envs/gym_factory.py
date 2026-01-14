@@ -36,11 +36,11 @@ def reset_env(env: gym.Env, seed: Optional[int] = None) -> Tuple[np.ndarray, dic
 def step_env(env: gym.Env, action: Any):
     """
     统一 step（兼容 gymnasium 的 terminated/truncated）
-    返回：next_obs, reward, done, info
+    返回：next_obs, reward, terminated, truncated, info
     """
     next_obs, reward, terminated, truncated, info = env.step(action)
     done = bool(terminated or truncated)
-    return next_obs, float(reward), done, info
+    return next_obs, float(reward), bool(terminated), bool(truncated), info
 
 
 def get_obs_act_dims(env: gym.Env) -> Tuple[int, int]:
