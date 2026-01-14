@@ -41,9 +41,9 @@ def ppo_update(
         buffer,
         update_epochs: int,
         minibatch_size: int,
-        clip_coef: int, # 即epsilon=0.2
-        vf_coef: int, # 价值损失权重 ，评价重要性 旋钮
-        ent_coef: int, # 熵系数，探索精神旋钮
+        clip_coef: float, # 即epsilon=0.2
+        vf_coef: float, # 价值损失权重 ，评价重要性 旋钮
+        ent_coef: float, # 熵系数，探索精神旋钮
         max_grad_norm: float, # 梯度裁剪阈值，参数保护锁
 ):
     """参数,控制对象,核心目的,默认值参考

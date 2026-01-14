@@ -27,5 +27,5 @@ class PPOCartPoleConfig:
     hidden: int = 128
 
     # training length
-    total_updates: int = 100   # 100轮 rollout+update
+    total_updates: int = 160   # 160轮 rollout+update
     print_every: int = 1

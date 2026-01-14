@@ -16,13 +16,15 @@ class RolloutBuffer:
         self.rewards = torch.zeros((T,),device=device)
         self.dones = torch.zeros((T,),device=device) # 1 if done else 0
         self.values = torch.zeros((T,),device=device)
+        self.timeouts = torch.zeros((T,), device=device)
+        self.terminal_values = torch.zeros((T,), device=device)
 
         self.advantages = torch.zeros((T,), device=device)
         self.returns = torch.zeros((T,), device=device)
 
         self.ptr = 0
 
-    def add(self, obs, action, logp, reward, done, value):
+    def add(self, obs, action, logp, reward, done, value, timeout=False, terminal_value=0.0):
         i = self.ptr
         self.obs[i] = obs
         self.actions[i] = action
@@ -30,6 +32,8 @@ class RolloutBuffer:
         self.rewards[i] = reward
         self.dones[i] = float(done)
         self.values[i] = value
+        self.timeouts[i] = float(timeout)
+        self.terminal_values[i] = terminal_value
         self.ptr += 1
     
     def compute_gae(self, last_value:torch.Tensor, gamma: float, lam: float):
@@ -47,7 +51,11 @@ class RolloutBuffer:
             # nonterminal = 1.0 - self.dones[t] 如果这一步游戏结束了（done=True），那么下一时刻的 Value 就不应该被计入。
             # 这个开关确保了奖励计算不会跨越两个不同的游戏局
             nonterminal = 1.0 - self.dones[t]
-            delta = self.rewards[t] + gamma * next_value * nonterminal -self.values[t]
+            reward = self.rewards[t]
+            if self.timeouts[t].item() > 0:
+                reward = reward + gamma * self.terminal_values[t]
+                nonterminal = 0.0
+            delta = reward + gamma * next_value * nonterminal - self.values[t]
             adv = delta + gamma * lam * nonterminal * adv
             self.advantages[t] = adv
         

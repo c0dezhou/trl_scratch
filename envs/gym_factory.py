@@ -19,7 +19,7 @@ def make_env(spec: EnvSpec) -> gym.Env:
     """
     创建环境，并做一次 reset(seed) 来固定初始随机性。
     """
-    env = gym.make(spec.env_id, spec.render_mode)
+    env = gym.make(spec.env_id, render_mode=spec.render_mode)
     env.reset(seed=spec.seed)
     return env
 
@@ -39,7 +39,6 @@ def step_env(env: gym.Env, action: Any):
     返回：next_obs, reward, terminated, truncated, info
     """
     next_obs, reward, terminated, truncated, info = env.step(action)
-    done = bool(terminated or truncated)
     return next_obs, float(reward), bool(terminated), bool(truncated), info
 
 

@@ -37,6 +37,9 @@ def main():
     ep_rets: list[float] = []
     ep_count = 0
     t0 = time.time()
+    best_score = -1e9
+    solved_cnt = 0
+    best_path = "best.pt"
 
     # 2.train
     for update in range(1,cfg.total_updates + 1):
@@ -61,25 +64,22 @@ def main():
             next_obs, reward_env, terminated, truncated, _ = step_env(env, action)
             done = terminated or truncated
 
-            # 训练用 reward：如果是时间截断，就把下一状态的价值补进去
-            # reward_env：环境给你的真实即时奖励 rt（CartPole 每步基本是 1）
-            # reward_train：我们为了正确处理 truncated，可能会把它改成
-            # reward_env + gamma * V(next_obs)（只在 time limit 截断时）
-            reward_train = reward_env # 默认训练奖励 = 环境奖励
-            # ***截断处理***
-            if truncated and (not terminated):
+            timeout = bool(truncated and (not terminated))
+            terminal_value = 0.0
+            if timeout:
                 with torch.no_grad():
                     next_obs_t = torch.tensor(next_obs, dtype=torch.float32, device=device)
-                _, v_next = model(next_obs_t)
-                reward_train = reward_env + cfg.gamma * float(v_next.item())
+                    _, terminal_value = model(next_obs_t)
 
             buf.add(
                 obs=obs_t,
                 action=action_t,
                 logp=logp_t,
-                reward=reward_train,
+                reward=reward_env,
                 done=done,
                 value=value_t,
+                timeout=timeout,
+                terminal_value=terminal_value,
             )
 
             ep_ret += reward_env
@@ -125,9 +125,18 @@ def main():
             max_grad_norm=cfg.max_grad_norm,
         )
 
-        #=== logging ===
+        #=== logging / checkpoint / early stop ===
+        avg100 = float(np.mean(ep_rets[-100:])) if len(ep_rets) > 0 else 0.0
+        if avg100 > best_score:
+            best_score = avg100
+            torch.save(model.state_dict(), best_path)
+
+        if avg100 >= 475:
+            solved_cnt += 1
+        else:
+            solved_cnt = 0
+
         if update % cfg.print_every == 0:
-            avg100 = float(np.mean(ep_rets[-100:])) if len(ep_rets) > 0 else 0.0
             print(
                 f"update {update:3d}/{cfg.total_updates} | "
                 f"terminated={term_cnt}, truncated={trunc_cnt}, max_ep_len={max_ep_len} | "
@@ -135,6 +144,10 @@ def main():
                 f"avg_return(last100) {avg100:7.1f} | "
                 f"time {time.time() - t0:.1f}s"
             )
+
+        if solved_cnt >= 5:
+            print("Solved, early stop.")
+            break
 
     env.close()
     print("done.")
