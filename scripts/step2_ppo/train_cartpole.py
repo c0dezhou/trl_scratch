@@ -24,8 +24,12 @@ def main():
 
     # 1.init
     # ---env----
-    env = make_env(EnvSpec(env_id=cfg.env_id, seed=cfg.seed))
-    obs_dim, act_dim = get_obs_act_dims(env)
+    # env = make_env(EnvSpec(env_id=cfg.env_id, seed=cfg.seed))
+    # obs_dim, act_dim = get_obs_act_dims(env)
+    env = make_env(cfg.env_id, cfg.seed)()
+    obs_dim = env.observation_space.shape[0]
+    act_dim = env.action_space.n
+
 
     # ---model/optim----
     model = ActorCriticMLP(obs_dim, act_dim, hidden=cfg.hidden).to(device)
