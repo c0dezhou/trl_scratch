@@ -22,8 +22,23 @@ class PPOCartPolePOMDPTRConfig(PPOCartPoleConfig):
     # pomdp_keep_idx=None
 
     # history length T: env 输出 (T, D)
-    # history_len: int = 32
-    history_len: int = 1
+    history_len: int = 32
+    # history_len: int = 1
+
+    # PPO update (override defaults if needed)
+    update_epochs: int = 10
+    minibatch_size: int = 256
+
+    # debug: 打印 POMDP 历史堆叠/keep_idx 的一致性
+    debug_pomdp: bool = False
+    debug_history_steps: int = 5
+
+    # eval
+    eval_every: int = 5
+    eval_episodes: int = 5
+
+    # logging
+    log_verbose: bool = False
 
     # model backbone
     model_type: ModelType = "gpt"  # "mlp" baseline / "gpt" transformer
