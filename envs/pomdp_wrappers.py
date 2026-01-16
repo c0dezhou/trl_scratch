@@ -27,12 +27,50 @@ class MaskObsWrapper(gym.ObservationWrapper):
     def observation(self, obs: np.ndarray) -> np.ndarray:
         return obs[self.keep_idx].astype(np.float32)
 
+# 叠加“速度差分”特征
+class DeltaObsWrapper(gym.ObservationWrapper):
+    """
+    把单步 obs 扩展成 [obs, delta]，其中 delta = obs_t - obs_{t-1}。
+    reset 时 delta 用 0。
+    """
+    def __init__(self, env: gym.Env):
+        super().__init__(env)
+        assert isinstance(env.observation_space, Box)
+        obs_space: Box = env.observation_space
+
+        low = obs_space.low.astype(np.float32)
+        high = obs_space.high.astype(np.float32)
+        delta_low = low - high
+        delta_high = high - low
+        self.observation_space = Box(
+            low=np.concatenate([low, delta_low], axis=0),
+            high=np.concatenate([high, delta_high], axis=0),
+            dtype=np.float32,
+        )
+        self._prev = None
+
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        obs = obs.astype(np.float32)
+        self._prev = obs.copy()
+        delta = np.zeros_like(obs, dtype=np.float32)
+        return np.concatenate([obs, delta], axis=0), info
+
+    def observation(self, obs: np.ndarray) -> np.ndarray:
+        obs = obs.astype(np.float32)
+        if self._prev is None:
+            delta = np.zeros_like(obs, dtype=np.float32)
+        else:
+            delta = obs - self._prev
+        self._prev = obs.copy()
+        return np.concatenate([obs, delta], axis=0)
+
 # 赋予模型“记忆”
 # 既然信息被屏蔽了（比如没了速度），我们就给模型看最近T步的快照，让它自己通过对比快照来发现规律。
 class HistoryStackWrapper(gym.Wrapper):
     """
     返回最近 T 步 obs，shape: (T, obs_dim)
-    reset 时前 T-1 步用 0 padding
+    reset 时用首帧重复填满历史，避免分布突变
     """
     def __init__(self, env: gym.Env, history_len: int):
         super().__init__(env)
@@ -56,19 +94,12 @@ class HistoryStackWrapper(gym.Wrapper):
         # 1.清空旧的记忆(上一episode的记忆不能带到下一局)
         self._buf.clear()
 
-        #2.制作一个“空白”的快照
-        zero = np.zeros_like(obs, dtype=np.float32)
+        #2.用首帧填满历史，避免 episode 开头全零导致分布突变
+        for _ in range(self.history_len):
+            self._buf.append(obs)
 
-        #3.填充历史
-        # reset应当返回当前局的第一帧观测（即起始状态），所以填充history_len - 1个0
-        for _ in range(self.history_len-1):
-            self._buf.append(zero)
-        
-        #4.最后塞入当前真实的初始观测（起始状态
-        self._buf.append(obs)
-
-        #5.堆叠返回
-        # 结果就是：[0, 0, 0, 真实obs_0]
+        #3.堆叠返回
+        # 结果就是：[obs_0, obs_0, ..., obs_0]
         return np.stack(self._buf, axis=0), info
 
     def step(self, action):
@@ -76,6 +107,4 @@ class HistoryStackWrapper(gym.Wrapper):
         obs = obs.astype(np.float32)
         self._buf.append(obs)
         return np.stack(self._buf, axis=0), reward, terminated, truncated, info
-
-
 

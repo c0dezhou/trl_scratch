@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional, Tuple, Any
-from envs.pomdp_wrappers import MaskObsWrapper, HistoryStackWrapper
+from envs.pomdp_wrappers import MaskObsWrapper, HistoryStackWrapper, DeltaObsWrapper
 
 import gymnasium as gym
 import numpy as np
@@ -30,7 +30,15 @@ class EnvSpec:
     History 层：看到 Mask 层的数据，把它塞进队列，返回 [[过去3帧...], [当前帧]]。
     模型：最终拿到的是一个时空矩阵。
 """
-def make_env(env_id:str, seed: int, *, pomdp_keep_idx=None, history_len: int = 1, **kwargs):
+def make_env(
+    env_id: str,
+    seed: int,
+    *,
+    pomdp_keep_idx=None,
+    history_len: int = 1,
+    use_delta_obs: bool = False,
+    **kwargs,
+):
 # *是指示它之后的参数必须以kv方式传入，**是打包传入剩下所有参数
     def thunk(): # 闭包返回“说明书”，真正的环境不会在make_env时创建
         env = gym.make(env_id, **kwargs)
@@ -38,6 +46,9 @@ def make_env(env_id:str, seed: int, *, pomdp_keep_idx=None, history_len: int = 1
 
         if pomdp_keep_idx is not None:
             env = MaskObsWrapper(env, keep_idx=pomdp_keep_idx)
+
+        if use_delta_obs:
+            env = DeltaObsWrapper(env)
         
         if history_len and history_len > 1:
             env = HistoryStackWrapper(env, history_len=history_len)

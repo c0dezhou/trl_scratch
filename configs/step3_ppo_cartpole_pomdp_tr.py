@@ -1,4 +1,4 @@
-# Step3 基类 + 默认 GPT-T32
+# Step3 基类 + 默认 GPT-T4 (+delta)
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -22,12 +22,18 @@ class PPOCartPolePOMDPTRConfig(PPOCartPoleConfig):
     # pomdp_keep_idx=None
 
     # history length T: env 输出 (T, D)
-    history_len: int = 32
-    # history_len: int = 1
+    # history_len: int = 32
+    history_len: int = 4
+    use_delta_obs: bool = False
 
     # PPO update (override defaults if needed)
+    rollout_steps: int = 2048
     update_epochs: int = 10
     minibatch_size: int = 256
+    clip_coef: float = 0.2
+    target_kl: Optional[float] = None
+    ent_coef: float = 0.005
+    clip_vloss: bool = False
 
     # debug: 打印 POMDP 历史堆叠/keep_idx 的一致性
     debug_pomdp: bool = False
@@ -36,6 +42,8 @@ class PPOCartPolePOMDPTRConfig(PPOCartPoleConfig):
     # eval
     eval_every: int = 5
     eval_episodes: int = 5
+    final_eval_episodes: int = 100
+    final_eval_sample_episodes: int = 100
 
     # logging
     log_verbose: bool = False
@@ -52,5 +60,6 @@ class PPOCartPolePOMDPTRConfig(PPOCartPoleConfig):
 
 
 # ---- exports for trainer ----
-RUN_NAME = "step3_pomdp_gpt_t32"
+RUN_NAME = "step3_pomdp_gpt_t4_delta"
 CFG = PPOCartPolePOMDPTRConfig()
+CFG.use_delta_obs = True

@@ -31,6 +31,8 @@ Combined Loss for Gradient Descent:
 loss = policy_loss + (vf_coef * value_loss) - (ent_coef * entropy)
        ^(actor)       ^(critic)                ^(exploration)
 """
+from typing import Optional
+
 import torch
 import torch.nn.functional as F
 from torch.distributions import Categorical
@@ -45,6 +47,8 @@ def ppo_update(
         vf_coef: float, # 价值损失权重 ，评价重要性 旋钮
         ent_coef: float, # 熵系数，探索精神旋钮
         max_grad_norm: float, # 梯度裁剪阈值，参数保护锁
+        target_kl: Optional[float] = None, # KL 早停阈值
+        clip_vloss: bool = False, # 是否启用 value loss clipping
 ):
     """参数,控制对象,核心目的,默认值参考
 clip_coef,策略更新幅度,保命：防止模型突然学废,0.2
@@ -52,7 +56,7 @@ vf_coef,价值网络学习,评价：让教练看局势看更准,0.5
 ent_coef,策略探索度,探索：防止模型过早自满,0.01
 max_grad_norm,梯度更新强度,稳定：防止参数更新步长暴走,0.5"""
     for _ in range(update_epochs):
-        for obs, act, old_logp, adv, ret, old_v, in buffer.get_minibatches(minibatch_size):
+        for obs, act, old_logp, adv, ret, old_v in buffer.get_minibatches(minibatch_size):
             logits, v = model(obs)
             dist = Categorical(logits=logits) # 概率分布对象, 像是一个装了不同大小扇形的转盘
             # dist.sample()	随机转动转盘得到的结果	0 或 1
@@ -70,7 +74,13 @@ max_grad_norm,梯度更新强度,稳定：防止参数更新步长暴走,0.5"""
             policy_loss = -torch.mean(torch.min(unclipped, clipped))
 
             # 核心公式 3：三合一 Loss
-            value_loss = 0.5 * F.mse_loss(v, ret)
+            if clip_vloss:
+                v_clipped = old_v + (v - old_v).clamp(-clip_coef, clip_coef)
+                v_loss_unclipped = (v - ret).pow(2)
+                v_loss_clipped = (v_clipped - ret).pow(2)
+                value_loss = 0.5 * torch.mean(torch.max(v_loss_unclipped, v_loss_clipped))
+            else:
+                value_loss = 0.5 * F.mse_loss(v, ret)
             loss = policy_loss + vf_coef * value_loss - ent_coef * entropy
 
             optimizer.zero_grad(set_to_none=True)
@@ -78,6 +88,10 @@ max_grad_norm,梯度更新强度,稳定：防止参数更新步长暴走,0.5"""
             # 把梯度的模长限制在一个范围内（比如 0.5），确保更新步长永远是安全的
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             optimizer.step()
+
+            approx_kl = (old_logp - new_logp).mean().item()
+            if target_kl is not None and approx_kl > 1.5 * target_kl:
+                return
 
 
 

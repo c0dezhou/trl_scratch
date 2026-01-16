@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 import time
 import numpy as np
 import torch
 import gymnasium as gym
+from torch.distributions import Categorical
 
 from core.nn_utils import seed_everything, get_device
 from envs.gym_factory import EnvSpec, make_env, reset_env, step_env
@@ -46,6 +48,7 @@ def debug_pomdp_env(cfg) -> None:
             cfg.seed,
             pomdp_keep_idx=cfg.pomdp_keep_idx,
             history_len=1,
+            use_delta_obs=getattr(cfg, "use_delta_obs", False),
         )()
         keep_obs, _ = reset_env(wrapped_env, seed=cfg.seed)
         wrapped_env.close()
@@ -62,6 +65,7 @@ def debug_pomdp_env(cfg) -> None:
             cfg.seed,
             pomdp_keep_idx=cfg.pomdp_keep_idx,
             history_len=cfg.history_len,
+            use_delta_obs=getattr(cfg, "use_delta_obs", False),
         )()
         obs, _ = reset_env(hist_env, seed=cfg.seed)
         head, tail = _peek_history(obs)
@@ -79,12 +83,13 @@ def debug_pomdp_env(cfg) -> None:
                 print(f"[debug] after reset head={head} tail={tail}")
         hist_env.close()
 
-def eval_greedy(model, cfg, n_episodes: int = 5) -> tuple[float, float]:
+def eval_policy(model, cfg, n_episodes: int = 5, *, greedy: bool = True) -> tuple[float, float]:
     eval_env = make_env(
         cfg.env_id,
         cfg.seed + 9999,
         pomdp_keep_idx=cfg.pomdp_keep_idx,
         history_len=cfg.history_len,
+        use_delta_obs=getattr(cfg, "use_delta_obs", False),
     )()
     model.eval()
     rets: list[float] = []
@@ -99,7 +104,11 @@ def eval_greedy(model, cfg, n_episodes: int = 5) -> tuple[float, float]:
             obs_t = torch.tensor(obs, dtype=torch.float32, device=device)
             with torch.inference_mode():
                 logits, _ = model(obs_t)
-                action = int(torch.argmax(logits).item())
+                if greedy:
+                    action = int(torch.argmax(logits).item())
+                else:
+                    dist = Categorical(logits=logits)
+                    action = int(dist.sample().item())
             obs, r, terminated, truncated, _ = step_env(eval_env, action)
             obs = flatten_obs(obs)
             done = terminated or truncated
@@ -139,6 +148,7 @@ def train_once(cfg, run_name: str):
         cfg.seed,
         pomdp_keep_idx=cfg.pomdp_keep_idx,
         history_len=cfg.history_len,
+        use_delta_obs=getattr(cfg, "use_delta_obs", False),
     )() # ← 这一对括号很关键：真正创建环境
 
     obs_shape = env.observation_space.shape
@@ -264,6 +274,8 @@ def train_once(cfg, run_name: str):
                 vf_coef=cfg.vf_coef,
                 ent_coef=cfg.ent_coef,
                 max_grad_norm=cfg.max_grad_norm,
+                target_kl=getattr(cfg, "target_kl", None),
+                clip_vloss=getattr(cfg, "clip_vloss", False),
             )
         update_s = time.time() - t_update
 
@@ -273,8 +285,8 @@ def train_once(cfg, run_name: str):
         eval_s = 0.0
         if getattr(cfg, "eval_every", 0) and update % cfg.eval_every == 0:
             t_eval = time.time()
-            eval_mean, eval_std = eval_greedy(
-                model, cfg, n_episodes=getattr(cfg, "eval_episodes", 5)
+            eval_mean, eval_std = eval_policy(
+                model, cfg, n_episodes=getattr(cfg, "eval_episodes", 5), greedy=True
             )
             eval_s = time.time() - t_eval
 
@@ -310,7 +322,7 @@ def train_once(cfg, run_name: str):
             else:
                 line = (
                     f"[run={run_name}] upd {update:3d}/{cfg.total_updates} | "
-                    f"epi {len(ep_rets):4d} | avg100 {avg100:5.1f} | sps {sps:6.0f}"
+                    f"max_ep_len={max_ep_len} | avg100 {avg100:5.1f} | steps {steps_collected} | sps {sps:6.0f}"
                 )
                 if eval_mean is not None:
                     line += f" | eval {eval_mean:.1f}±{eval_std:.1f}"
@@ -321,6 +333,29 @@ def train_once(cfg, run_name: str):
             break
 
     env.close()
+
+    final_eval_episodes = int(getattr(cfg, "final_eval_episodes", 0))
+    if final_eval_episodes > 0 and os.path.exists(best_path):
+        state = torch.load(best_path, map_location=device)
+        model.load_state_dict(state)
+        best_mean, best_std = eval_policy(
+            model, cfg, n_episodes=final_eval_episodes, greedy=True
+        )
+        print(
+            f"[run={run_name}] best_ckpt eval: mean={best_mean:.1f} std={best_std:.1f} "
+            f"(n={final_eval_episodes})"
+        )
+
+        sample_episodes = int(getattr(cfg, "final_eval_sample_episodes", 0))
+        if sample_episodes > 0:
+            sample_mean, sample_std = eval_policy(
+                model, cfg, n_episodes=sample_episodes, greedy=False
+            )
+            print(
+                f"[run={run_name}] best_ckpt eval(sample): mean={sample_mean:.1f} "
+                f"std={sample_std:.1f} (n={sample_episodes})"
+            )
+
     print(f"[run={run_name}] done. best_ckpt={best_path}")
 
 

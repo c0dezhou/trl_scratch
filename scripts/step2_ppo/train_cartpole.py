@@ -127,6 +127,8 @@ def main():
             vf_coef=cfg.vf_coef,
             ent_coef=cfg.ent_coef,
             max_grad_norm=cfg.max_grad_norm,
+            target_kl=getattr(cfg, "target_kl", None),
+            clip_vloss=getattr(cfg, "clip_vloss", False),
         )
 
         #=== logging / checkpoint / early stop ===
