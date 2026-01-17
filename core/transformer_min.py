@@ -164,6 +164,8 @@ class Block(nn.Module):
         self.drop = nn.Dropout(dropout)
     
     def forward(self, x: torch.Tensor, attn_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        # 残差连接 x = x + ... 是灵魂,保留原始信息，只学习“变化量”
+        # 梯度可以无损地从第 10 层直接流回第 1 层,如果没有这个 +，深层网络的梯度传到底层时早就消失了（Vanishing Gradient）
         x = x + self.drop(self.attn(self.ln1(x), attn_mask=attn_mask))
         x = x + self.drop(self.ffn(self.ln2(x)))
         return x
