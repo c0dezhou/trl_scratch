@@ -82,10 +82,11 @@ def get_obs_act_dims(env: gym.Env) -> Tuple[int, int]:
     obs_space = env.observation_space
     act_space = env.action_space
 
-    assert hasattr(obs_space, "shape") and len(obs_space.shape) == 1,f"不支持的obs空间：{obs_space}"
-    obs_dim = obs_space.shape[0]
+    assert hasattr(obs_space, "shape"), f"不支持的obs空间：{obs_space}"
+    # prod 计算乘积
+    obs_dim = int(np.prod(obs_space.shape))  #  1D/2D 都行
 
-    assert hasattr(act_space,"n") , f"不支持的动作空间:{act_space}"
-    act_dim = act_space.n
+    assert hasattr(act_space, "n"), f"不支持的动作空间:{act_space}"
+    act_dim = int(act_space.n)
 
     return obs_dim, act_dim
