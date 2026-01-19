@@ -148,7 +148,7 @@ def main() -> None:
             rtg_now = rtg_now - float(r) / rtg_scale
             t += 1
 
-            returns.append(ep_ret)
+        returns.append(ep_ret)
 
     print(f"[eval] episodes={args.episodes} avg_return={float(np.mean(returns)):.1f}")
 
