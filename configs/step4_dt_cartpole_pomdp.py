@@ -16,7 +16,7 @@ class Step4DTConfig:
     history_len: int = 1                      # DT 自己用 context_len“记忆”，这里 env 不需要堆历史
 
     # --- offline数据集 ---
-    dataset_path: str = "data/cartpole_pomdp_from_step3.npz"
+    dataset_path: str = "data/cartpole_pomdp_from_step3_full.npz"
     # RTG 缩放：CartPole 最多 500 分，rtg / 500 会更稳定
     rtg_scale: float = 500.0
 
