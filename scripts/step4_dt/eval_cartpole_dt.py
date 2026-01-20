@@ -12,7 +12,7 @@ import torch
 
 from core.nn_utils import get_device, seed_everything
 from envs.gym_factory import make_env, reset_env, step_env
-from offline.decision_transformer import DT
+from offline.decision_transformer import DecisionTransformer
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -35,7 +35,7 @@ def main() -> None:
     seed_everything(int(cfg.get("seed", 42)))
 
     # 搭架子，随机初始化
-    model = DT(
+    model = DecisionTransformer(
         state_dim=int(pack["state_dim"]),
         act_dim=int(pack["act_dim"]),
         context_len=int(cfg["context_len"]),
@@ -86,7 +86,7 @@ def main() -> None:
             states.append(s)
             # 存储过去的动作。注意其中的 acts.append(0) 只是一个占位符，等模型预测出当前动作后会立即被替换。
             acts.append(0)
-            # 这是 DT 的“灵魂”。它告诉模型：“为了拿到剩下的分数，你应该怎么做？”
+            # 这是 DecisionTransformer 的“灵魂”。它告诉模型：“为了拿到剩下的分数，你应该怎么做？”
             rtgs.append(rtg_now)
             # 给 Transformer 提供时间位置信息
             tss.append(t)

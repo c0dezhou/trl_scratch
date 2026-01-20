@@ -7,7 +7,7 @@
 加载 step3 的 best ckpt（state_dict）
 跑 N 个 episode，把“每步当前观测 + 动作 + reward”存成一个 npz
 
-注意：默认存的是“当前时刻的观测”，不是 history stack 的 flatten，这样 DT 才真的需要用 context_len 来“记忆”
+注意：默认存的是“当前时刻的观测”，不是 history stack 的 flatten，这样 DecisionTransformer 才真的需要用 context_len 来“记忆”
 """
 
 from __future__ import annotations
@@ -42,8 +42,8 @@ def flatten_obs(obs: np.ndarray) -> np.ndarray:
 
 def current_frame(obs: np.ndarray) -> np.ndarray:
     # 传给dt (1帧)
-    """只取 obs[-1]。这是存入 Dataset 的，专门给未来的 DT 徒弟看。
-    DT 会自己通过 Transformer 重新把这些单帧拼成时序"""
+    """只取 obs[-1]。这是存入 Dataset 的，专门给未来的 DecisionTransformer 徒弟看。
+    DecisionTransformer 会自己通过 Transformer 重新把这些单帧拼成时序"""
     if obs.ndim == 2:
         # 使用了“历史堆叠”（History Stack）(比如history_len=5 obs=[5,4]的矩阵)
         return obs[-1].astype(np.float32)
@@ -132,7 +132,7 @@ def main() -> None:
 
     total_steps = 0
 
-    # 录制DT要用的npz
+    # 录制DecisionTransformer要用的npz
     for ep in range(args.episodes):
         # 每局一个新开端，给不同的seed保证训练时初始状态的差异
         # + 10000 的小细节：这通常是为了确保这些种子和你在训练 PPO 时用的种子（通常是 0-100 这种小数字）完全错开，避免数据重叠，保证数据的新鲜度
@@ -153,7 +153,7 @@ def main() -> None:
                 logits, _v = model(obs_t)
 
             if args.sample_actions:
-                # 给 DT 容错机会：DT 学习采样出的数据，能看到“如果稍微走偏了一点，后面怎么救回来”。
+                # 给 DecisionTransformer 容错机会：DecisionTransformer 学习采样出的数据，能看到“如果稍微走偏了一点，后面怎么救回来”。
                 # Categorical 返回的是一个概率分布对象，而不是单纯的数值。
                 # 你可以把它想象成一个抽奖箱
                 """
@@ -167,7 +167,7 @@ def main() -> None:
                 a = int(torch.argmax(logits, dim=-1).item())
             
             # 记录每一帧的动作，放入缓冲区buffer
-            # DT dataset 只存当前帧 current frame (no history stack)
+            # DecisionTransformer dataset 只存当前帧 current frame (no history stack)
             # 1.数据清洗（抠出最新一帧
             s = current_frame(obs)
 

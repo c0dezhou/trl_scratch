@@ -1,4 +1,4 @@
-# DT 模型本体
+# DecisionTransformer 模型本体
 # token 顺序固定为：(rtg_t, s_t, a_t) 反复拼起来
 # 预测动作用 state token 的 hidden（也就是序列里第 2 个 token 位置）
 # attention mask = causal mask + padding key mask（防止模型看见 padding）
@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from core.transformer_min import Block, LayerNorm
 
 @dataclass
-class DTBatch:
+class DecisionTransformerBatch:
     # 前面加了个batch维
     states: torch.Tensor     # [B, K, state_dim] float
     actions: torch.Tensor    # [B, K] long
@@ -22,8 +22,8 @@ class DTBatch:
     timesteps: torch.Tensor  # [B, K] long
     valid: torch.Tensor      # [B, K] float (0/1)
 
-class DT(nn.Module):
-    """最小可懂版本DT(离散动作)
+class DecisionTransformer(nn.Module):
+    """最小可懂版本DecisionTransformer(离散动作)
     输入（长度 K 的窗口）：
       - states:    [B, K, state_dim]
       - actions:   [B, K]
@@ -186,7 +186,7 @@ class DT(nn.Module):
 
         # 取 state token的位置：1,4,7...也就是1::3：从索引 1 开始，每隔 3 个取一个
         # x[:, 1::3, :]：精准“抠出”state特征
-        # DT认为：在 t 时刻，融合了当前目标 R_t 信息的状态特征 S_t，是预测动作 A_t 的最佳依据
+        # DecisionTransformer认为：在 t 时刻，融合了当前目标 R_t 信息的状态特征 S_t，是预测动作 A_t 的最佳依据
         h_state = x[:, 1::3, :]         # [B,K,d] 
         logits = self.action_head(h_state)  # [B,K,act_dim] 它把每个时间步的 d 维抽象向量，投影到动作空间上
         return logits
@@ -194,7 +194,7 @@ class DT(nn.Module):
         # S_0 位置的输出 -> 预测 A_hat_0 -> 对应真实 A_0
 
         """
-        总结：DT 的“生产线”全貌
+        总结：DecisionTransformer 的“生产线”全貌
         输入：[R, S, A] 三股绳子。
         加工：stack + reshape 编织成一根绳子，加上时间和位置补丁。
         消化：blocks 让信息在绳子上横向流动（但只能向左看）。

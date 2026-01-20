@@ -1,5 +1,5 @@
 # 离线轨迹 -> 训练样本切片
-# 把一条完整 episode 轨迹 (s0,a0,r0, s1,a1,r1, ...) 切成很多段长度为 K 的小窗口，算好 RTG，然后喂给 DT
+# 把一条完整 episode 轨迹 (s0,a0,r0, s1,a1,r1, ...) 切成很多段长度为 K 的小窗口，算好 RTG，然后喂给 DecisionTransformer
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class Episode:
 
 def compute_rtg(rewards: np.ndarray) -> np.ndarray:
     """
-    rtg就是还有多少步能走，这就是 DT 的“Prompt”
+    rtg就是还有多少步能走，这就是 DecisionTransformer 的“Prompt”
     Return-to-Go: RTG[t] = r[t] + r[t+1] + ... + r[T-1]
     CartPole 每步 reward=1，所以 RTG 很直观：还剩多少步能活。
     -训练：告诉模型“在这种状态下，想要拿到这个剩余总分，你应该做这个动作”。
@@ -108,7 +108,7 @@ class DecisionTransformerDataset(Dataset):
         for epi, ep in enumerate(self.episodes):
             """
             为什么用action做长度基准呢？理论上来说，len(actions)=len(rewards)=len(states)，
-            但是在DT的序列拼接中国，我们的基本单元是三元组(rtg_t,s_t,a_t)，
+            但是在DecisionTransformer的序列拼接中国，我们的基本单元是三元组(rtg_t,s_t,a_t)，
             有时st会比at多出一个，但在这个状态下已经无法做出动作了
             每一个a必定对应一个s和r，所以用action来对齐
             """

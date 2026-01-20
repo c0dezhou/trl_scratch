@@ -17,16 +17,16 @@ from torch.utils.data import DataLoader
 from core.nn_utils import get_device, seed_everything
 from envs.gym_factory import make_env, reset_env, step_env
 from offline.dt_dataset import DecisionTransformerDataset
-from offline.decision_transformer import DT
+from offline.decision_transformer import DecisionTransformer
 
 def load_cfg(cfg_module: str):
     mod = importlib.import_module(cfg_module)
-    if not hasattr(mod, "Step4DTConfig"):
-        raise AttributeError(f"{cfg_module} has no Step4DTConfig")
-    return mod.Step4DTConfig()
+    if not hasattr(mod, "Step4DecisionTransformerConfig"):
+        raise AttributeError(f"{cfg_module} has no Step4DecisionTransformerConfig")
+    return mod.Step4DecisionTransformerConfig()
 
 @torch.no_grad()
-def evaluate_dt(cfg, model: DT, ds: DecisionTransformerDataset):
+def evaluate_dt(cfg, model: DecisionTransformer, ds: DecisionTransformerDataset):
     """这个函数是把模型拉到真实的实时游戏环境里，看看它在没有标准答案参考的情况下，能不能根据你给的目标（RTG）自己玩通关。
     在强化学习中，光看训练时的 Loss（损失函数）下降是不够的。Loss 只能说明模型“模仿专家动作”模仿得像不像，但不能代表它玩得好不好。
     所以在训练时我们要暂停几局，让模型在真正的环境中跑几局算出平均分
@@ -61,7 +61,7 @@ def evaluate_dt(cfg, model: DT, ds: DecisionTransformerDataset):
         rtg_now = float(cfg.target_return) / float(cfg.rtg_scale)
         t = 0
 
-        # DT推理（测试）阶段最核心的数据准备与窗口滑动逻辑
+        # DecisionTransformer推理（测试）阶段最核心的数据准备与窗口滑动逻辑
         while not done:
             s = np.asarray(obs, dtype=np.float32)
             # 归一化:因为模型在训练时看的是“归一化”后的数据，
@@ -83,7 +83,7 @@ def evaluate_dt(cfg, model: DT, ds: DecisionTransformerDataset):
 
             valid_len = len(states)
 
-            # 输入序列长度每秒钟都在变，实现“动态数据，静态输入”，让DT稳定地流式处理数据
+            # 输入序列长度每秒钟都在变，实现“动态数据，静态输入”，让DecisionTransformer稳定地流式处理数据
             # 1.创建全0矩阵 
             states_pad = np.zeros((K, D), dtype=np.float32)
             actions_pad = np.zeros((K,), dtype=np.int64)
@@ -107,7 +107,7 @@ def evaluate_dt(cfg, model: DT, ds: DecisionTransformerDataset):
             ts_t = torch.tensor(ts_pad, device=device).unsqueeze(0)
             valid_t = torch.tensor(valid_pad, device=device).unsqueeze(0)
 
-            # 决策的瞬间：调用 DT 模型进行推理的核心接口
+            # 决策的瞬间：调用 DecisionTransformer 模型进行推理的核心接口
             """“自回归（Autoregressive）” 的推理过程： 
             模型产生的动作（Output）会影响环境，环境的反馈（Reward/Next Obs）又会变成模型下一秒的输入（Input）。"""
             # 接受context win的数据（r,s,a,t,valid）
@@ -169,7 +169,7 @@ def main():
     )
 
     # model
-    model = DT(
+    model = DecisionTransformer(
         state_dim=int(ds.state_dim),
         act_dim=int(ds.act_dim),
         context_len=int(cfg.context_len),
