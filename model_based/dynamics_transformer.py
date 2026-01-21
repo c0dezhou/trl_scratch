@@ -12,6 +12,14 @@ class DynOut:
     delta: torch.Tensor    # (B, K, state_dim)
     done_logits: torch.Tensor # (B, K, state_dim)
 
+"""
+输入：你给了模型一段历史 [s, a]。
+融合：模型把状态、动作、时间、位置全部揉在一起变成 Token。
+计算：Transformer 内部的 blocks 进行多层自注意力计算，理解物理因果。
+提取：模型盯着每一个动作 Token。
+翻译：通过两个 Head，把动作 Token 
+翻译成：“下一秒坐标变了多少”和“这一步会不会死”。
+"""
 class DynamicsTransformer(nn.module):
     """最小可懂的world model: Transformer dymanics
     利用 Transformer 学习因果律：如果我在状态 s 做了动作 a，世界会变成什么样？
@@ -135,14 +143,44 @@ class DynamicsTransformer(nn.module):
         done_logits = self.done_head(ha).squeeze(-1)  # (B,K)
 
         return DynOut(delta=delta, done_logits=done_logits)
-    """
-    输入：你给了模型一段历史 [s, a]。
-    融合：模型把状态、动作、时间、位置全部揉在一起变成 Token。
-    计算：Transformer 内部的 blocks 进行多层自注意力计算，理解物理因果。
-    提取：模型盯着每一个动作 Token。
-    翻译：通过两个 Head，把动作 Token 
-    翻译成：“下一秒坐标变了多少”和“这一步会不会死”。
-    """
 
-        
+    # 推理或MPC（预测控制）时，我们只关心：“基于目前的历史，我刚做的这最后一步动作，会导致什么结果？ 
+    """
+    这个函数在 MPC 里怎么用？想象你在做一个 Random Shooting MPC：
+    当前状态：你观测到了 s_t。
+    生成方案：你随机生成 1000 个可能的动作序列。
+    模拟推演：你把 (s_t, a_next_random) 喂给模型。
+        调用 predict_next_from_last 得到 s_{t+1}。
+        再把 (s_{t+1}, a_{next_random}}) 喂给模型...（以此类推推演 H 步）。
+    评估：你看这 1000 个方案里，哪一个方案推演出来的 s_{t+H} 奖励最高，且过程中 done_prob 始终很低。
+    执行：选那个最好的方案，迈出真实的第一步。
+    """
+    @torch.no_grad()
+    def predict_next_from_last(
+        self, # 输入当前的历史快照
+        states: torch.Tensor,     # (B,K,D) normalized
+        actions: torch.Tensor,    # (B,K)
+        timesteps: torch.Tensor,  # (B,K)
+        valid: torch.Tensor,      # (B,K)
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """返回last valid位置的 next state norm 和 done prob"""
+        out = self.forward(states, actions, timesteps, valid)
+        if valid.dtype != torch.bool:
+            v = valid > 0
+        else: v = valid
 
+        # 每个batch的 last valid index
+        # 统计每个样本里有多少个 True（有效位）
+        idx = (v.long().sum(dim=1)-1).clamp(min=0) #(B,)
+        # 高级索引 (Advanced Indexing)，从 (B, K, D) 的 Tensor 里，为每个 Batch 提取出不同的索引位置
+        # 传一个 Batch 的序号序列 b 和对应的位置序列 idx
+        b = torch.arange(states.shape[0], device=states.device)
+
+        cur = states[b, idx, :] #(B,D) 拿到当前的归一化状态 s_t
+        delta = out.delta[b, idx, :]  #(B,D) 拿到模型预测的变化量 Δs
+        # forward 输出的是 logits（实数范围）。通过 sigmoid 函数，将其压缩到 [0, 1] 之间
+        # 这个值越接近 1，代表模型认为这个动作执行后，环境越有可能 Game Over
+        done_prob = torch.sigmoid(out.done_logits[b, idx]) #(B,) 
+
+        next_state = cur + delta # 算出预测的 s_{t+1}
+        return next_state, done_prob
