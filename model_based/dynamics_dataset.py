@@ -104,7 +104,7 @@ class DynamicsSequenceDataset(Dataset):
         return len(self.index)
         
     def _norm_states(self, s:np.ndarray)->np.ndarray:
-        return (s-self.state_mean)/self.std
+        return (s-self.state_mean)/self.state_std
         
     def __getitem__(self, idx:int) -> Dict[str,torch.Tensor]:
         eid, start = self.index[idx]

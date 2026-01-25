@@ -64,9 +64,10 @@ def mpc_action(
     a_pad = _pad_left(act_hist.astype(np.int64), K, pad_value=0) # (K,)
     t_pad = _pad_left(t_hist.astype(np.int64), K, pad_value=0)   # (K,)
 
-    valid_len = min(obs_hist_raw.shape[0], K) # 计算实际有效的帧数
+    valid_len = min(obs_hist_raw.shape[0], K)  # 计算实际有效的帧数
     valid = np.zeros((K,), dtype=np.float32)
-    valid[K - valid_len :] = 1.0 # 要把最右侧的 valid_len 个位置设为 1.0
+    # 右对齐 valid（当前时刻在最右侧），与 _pad_left 保持一致
+    valid[K - valid_len :] = 1.0
 
     N = int(cfg.num_samples) # 平行宇宙的数量，通常是 1024
     H = int(cfg.horizon) # 脑内向未来模拟的步数，通常是 25
@@ -99,21 +100,27 @@ def mpc_action(
     # 在接下来的循环里，我们要把 cand 里的第 1 个预测动作填进去。填在哪？就填在 last_idx 这个位置，也就是紧跟着当前观测的地方
     last_idx = K - 1
 
+    # 对每条候选动作序列 cand[i, 0:H]，拿模型在“想象里”往前滚 H 步，
+    # 算这条序列的预期总收益 scores[i]，最后挑分数最高的那条，返回它的第一个动作
     for h in range(H):
-        # set action at current state (last token)
+        # 把候选动作塞进“当前时刻”的 action 位置 (last token)
         actions[:, last_idx] = cand[:, h]
 
+        # 用模型预测下一状态和终止概率
+        # 只用“最后一个 token 对应的当前时刻”来预测下一步（所以叫 from_last）
         next_state, done_prob = model.predict_next_from_last(states, actions, timesteps, valid_t)
 
         # expected step reward for CartPole: 1 - p(done)
+        # 把 done 概率变成“期望 reward”，累计到 scores
         step_r = (1.0 - done_prob).float()
         scores += alive * (cfg.gamma ** h) * step_r
 
         # update alive
+        # 把概率当成“是否死了”
         dead = (done_prob >= cfg.done_threshold).float()
         alive = alive * (1.0 - dead)
 
-        # append predicted next state: shift window left, put next at end
+        # 窗口左移一格，把 next_state 塞到末尾
         states = torch.roll(states, shifts=-1, dims=1)
         actions = torch.roll(actions, shifts=-1, dims=1)
         timesteps = torch.roll(timesteps, shifts=-1, dims=1)
@@ -124,5 +131,6 @@ def mpc_action(
         timesteps[:, -1] = (timesteps[:, -2] + 1).clamp(max=model.max_timestep - 1)
         valid_t[:, -1] = 1.0
 
+    # 最后选最好的候选序列，返回第一步动作
     best = int(torch.argmax(scores).item())
     return int(cand[best, 0].item())

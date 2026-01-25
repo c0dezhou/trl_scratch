@@ -10,7 +10,7 @@ from core.transformer_min import Block, LayerNorm
 @dataclass
 class DynOut:
     delta: torch.Tensor    # (B, K, state_dim)
-    done_logits: torch.Tensor # (B, K, state_dim)
+    done_logits: torch.Tensor # (B, K)
 
 """
 输入：你给了模型一段历史 [s, a]。
@@ -20,7 +20,7 @@ class DynOut:
 翻译：通过两个 Head，把动作 Token 
 翻译成：“下一秒坐标变了多少”和“这一步会不会死”。
 """
-class DynamicsTransformer(nn.module):
+class DynamicsTransformer(nn.Module):
     """最小可懂的world model: Transformer dymanics
     利用 Transformer 学习因果律：如果我在状态 s 做了动作 a，世界会变成什么样？
     Token 排列（长度 2K）：
@@ -54,7 +54,7 @@ class DynamicsTransformer(nn.module):
         # 将离散动作 ID 映射成向量
         self.action_embed = nn.Embedding(self.act_dim,self.d_model)
         # 它告诉模型这一帧发生在游戏的什么时候
-        self.max_timestep_embed = nn.Embedding(self.max_timestep, self.d_model)
+        self.timestep_embed  = nn.Embedding(self.max_timestep, self.d_model)
 
         # 位置编码： 2K 长度，这一步在step中的位置
         # 力学预测（Dynamics）最核心的就是时间因果。模型必须知道 a_0 是作用在 s_0 之后的，才能预测出 s_1。
@@ -124,10 +124,10 @@ class DynamicsTransformer(nn.module):
         token_valid[:, 1::2] = v  # 对应所有 a_tok 的位置
 
         # 1) 因果掩码causal mask (2K, 2K): 只能look back，不能look ahead
-        causal = torch.trill(torch.ones(2*K, 2*K), device=states.device, dtype=torch.bool).view(1, 1, K, K)
-        # 2) key padding mask: [B,1,1,T]
-        key_mask = token_valid.to(torch.bool).view(B, 1, 1, K)
-        # 3) 合并: [B,1,K,K]
+        causal = torch.tril(torch.ones(2 * K, 2 * K, device=states.device, dtype=torch.bool))
+        # 2) key padding mask: [B,1,1,2K]
+        key_mask = token_valid.to(torch.bool).view(B, 1, 1, 2 * K)
+        # 3) 合并: [B,1,2K,2K]
         attn_mask = causal & key_mask
 
 
@@ -169,9 +169,12 @@ class DynamicsTransformer(nn.module):
             v = valid > 0
         else: v = valid
 
-        # 每个batch的 last valid index
-        # 统计每个样本里有多少个 True（有效位）
-        idx = (v.long().sum(dim=1)-1).clamp(min=0) #(B,)
+        # predict_next_from_last 的 last valid 索引计算改为“取最后一个 True”，不再假设 valid 左/右对齐
+        # 每个 batch 的 last valid index（不假设左/右对齐）
+        # 把 invalid 位置标成 -1，然后取最大值
+        pos = torch.arange(v.shape[1], device=v.device)
+        idx = torch.where(v, pos, torch.full_like(pos, -1)).max(dim=1).values
+        idx = idx.clamp(min=0)  # 若全是 invalid，退化到 0
         # 高级索引 (Advanced Indexing)，从 (B, K, D) 的 Tensor 里，为每个 Batch 提取出不同的索引位置
         # 传一个 Batch 的序号序列 b 和对应的位置序列 idx
         b = torch.arange(states.shape[0], device=states.device)
