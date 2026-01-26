@@ -29,7 +29,7 @@ class Step5WorldModelConfig:
     history_len: int = 1                      # online eval 用 1（模型自己吃序列）
 
     # --- 离线数据集 ---
-    dataset_path: str = "data/cartpole_pomdp_from_step3_full.npz"
+    dataset_path: str = "data/cartpole_pomdp_from_step3_mixed.npz"
     context_len: int = 20
     # 按 episode 切分 train/val（更稳妥，不泄漏）
     val_frac_episodes: float = 0.1
@@ -54,9 +54,14 @@ class Step5WorldModelConfig:
 
     # done loss 权重（delta_loss + done_coef * done_loss）
     done_coef: float = 1.0
+    # rollout loss（多步预测稳定性）
+    rollout_steps: int = 5
+    rollout_coef: float = 1.0
 
     # --- MPC ---
     mpc_horizon: int = 25
     mpc_num_samples: int = 1024
     mpc_done_threshold: float = 0.5
     mpc_gamma: float = 1.0
+    # reward shaping inside MPC (does NOT affect env return)
+    mpc_state_cost_coef: float = 1.0

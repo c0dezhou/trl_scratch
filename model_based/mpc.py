@@ -17,6 +17,8 @@ class MPCConfig:
     done_threshold: float = 0.5
     gamma: float = 1.0
     seed: int = 0
+    # reward shaping for CartPole: penalize |x| and |theta| (normalized space)
+    state_cost_coef: float = 1.0
 
 # 1. 补齐缺失的记忆 左补齐
 # offline用右对齐， online用左对齐
@@ -110,9 +112,12 @@ def mpc_action(
         # 只用“最后一个 token 对应的当前时刻”来预测下一步（所以叫 from_last）
         next_state, done_prob = model.predict_next_from_last(states, actions, timesteps, valid_t)
 
-        # expected step reward for CartPole: 1 - p(done)
-        # 把 done 概率变成“期望 reward”，累计到 scores
-        step_r = (1.0 - done_prob).float()
+        # expected step reward for CartPole: 1 - p(done) - state_cost
+        # 用预测的 next_state(已是归一化空间) 计算代价（只用 obs 的前两维: x, theta）
+        x = next_state[:, 0]
+        theta = next_state[:, 1]
+        state_cost = x.pow(2) + theta.pow(2)
+        step_r = (1.0 - done_prob).float() - float(cfg.state_cost_coef) * state_cost
         scores += alive * (cfg.gamma ** h) * step_r
 
         # update alive

@@ -71,15 +71,15 @@ def main() -> None:
 
     for batch in loader:
 
-        states = batch["states"]            # (B, K, state_dim)  归一化后的 state（大概率）
-        actions = batch["actions"]          # (B, K)             离散动作 id
-        timesteps = batch["timesteps"]      # (B, K)             时间步
-        valid = batch["valid"]              # (B, K)             真实数据=1，padding=0
+        states = batch["states"].to(device)            # (B, K, state_dim)  归一化后的 state（大概率）
+        actions = batch["actions"].to(device)          # (B, K)             离散动作 id
+        timesteps = batch["timesteps"].to(device)      # (B, K)             时间步
+        valid = batch["valid"].to(device)              # (B, K)             真实数据=1，padding=0
 
-        delta_tgt = batch["delta_targets"]  # (B, K, state_dim)  目标 delta：s_{t+1}-s_t（归一化空间）
-        done_tgt = batch["done_targets"]    # (B, K)             目标 done(0/1)
+        delta_tgt = batch["delta_targets"].to(device)  # (B, K, state_dim)  目标 delta：s_{t+1}-s_t（归一化空间）
+        done_tgt = batch["done_targets"].to(device)    # (B, K)             目标 done(0/1)
 
-        trans_valid = batch["trans_valid"]  # (B, K)             transition 是否有效
+        trans_valid = batch["trans_valid"].to(device)  # (B, K)             transition 是否有效
         """
         valid：这个 timestep 是否真实存在（不是 padding）
         trans_valid：这个 timestep 是否有“下一步”（能定义 delta）

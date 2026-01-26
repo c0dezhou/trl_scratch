@@ -84,9 +84,9 @@ def build_policy_model(cfg, obs0: np.ndarray, act_dim: int) -> torch.nn.Module:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--policy_config", type=str, required=True,
+    ap.add_argument("--policy_config", type=str, default=None,
                     help="step3 config module path, e.g. configs.step3_ppo_cartpole_pomdp_tr")
-    ap.add_argument("--policy_ckpt", type=str, required=True,
+    ap.add_argument("--policy_ckpt", type=str, default=None,
                     help="step3 best checkpoint path (.pt state_dict)")
     ap.add_argument("--out", type=str, default="data/cartpole_pomdp_from_step3.npz")
     ap.add_argument("--episodes", type=int, default=200)
@@ -94,33 +94,51 @@ def main() -> None:
     ap.add_argument("--device", type=str, default=None)
     ap.add_argument("--sample_actions", action="store_true",
                     help="sample from policy distribution (more diverse); default argmax")
+    ap.add_argument(
+        "--random_only",
+        action="store_true",
+        help="ignore policy, take random actions only (no step3 ckpt needed)",
+    )
+    ap.add_argument(
+        "--random_action_prob",
+        type=float,
+        default=0.0,
+        help="with this prob, override policy and take a random action (encourage exploration)",
+    )
     args = ap.parse_args()
 
-    cfg = load_cfg(args.policy_config)
+    if not args.random_only:
+        if not args.policy_config or not args.policy_ckpt:
+            raise ValueError("--policy_config and --policy_ckpt are required unless --random_only")
+    cfg = load_cfg(args.policy_config) if not args.random_only else None
     seed_everything(args.seed)
+    rng = np.random.RandomState(args.seed)
 
     # 按照step3创建环境
     env = make_env(
-        env_id=getattr(cfg, "env_id", "CartPole-v1"),
+        env_id=getattr(cfg, "env_id", "CartPole-v1") if cfg is not None else "CartPole-v1",
         seed=args.seed,
-        pomdp_keep_idx=tuple(getattr(cfg, "pomdp_keep_idx", (0, 2))),
-        history_len=int(getattr(cfg, "history_len", 1)),
-        use_delta_obs=bool(getattr(cfg, "use_delta_obs", False)),
+        pomdp_keep_idx=tuple(getattr(cfg, "pomdp_keep_idx", (0, 2))) if cfg is not None else (0, 2),
+        history_len=int(getattr(cfg, "history_len", 1)) if cfg is not None else 1,
+        use_delta_obs=bool(getattr(cfg, "use_delta_obs", False)) if cfg is not None else False,
     )()
 
     obs0, _ = reset_env(env, seed=args.seed)
     act_dim = int(env.action_space.n)
 
-    device = get_device(args.device)
-    # （全是随机初始化的乱码参数）
-    model = build_policy_model(cfg, obs0, act_dim).to(device)
+    model = None
+    device = None
+    if not args.random_only:
+        device = get_device(args.device)
+        # （全是随机初始化的乱码参数）
+        model = build_policy_model(cfg, obs0, act_dim).to(device)
 
-    # 加载step3训练好的pt文件
-    sd = torch.load(args.policy_ckpt, map_location=device)
-    # 把pt里面读出来的参数值装到model中
-    model.load_state_dict(sd)
-    # 不是为了训练，而是为了录制教学视频，所以用eval（关闭drop
-    model.eval()
+        # 加载step3训练好的pt文件
+        sd = torch.load(args.policy_ckpt, map_location=device)
+        # 把pt里面读出来的参数值装到model中
+        model.load_state_dict(sd)
+        # 不是为了训练，而是为了录制教学视频，所以用eval（关闭drop
+        model.eval()
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
 
@@ -142,17 +160,23 @@ def main() -> None:
 
         while True:
             # policy input 是flattened的history stack
-            obs_flat = flatten_obs(obs)
-            # PyTorch 的模型永远默认输入是成批处理的,所以要加unsqueeze0，前面加一个批次维度
-            obs_t = torch.tensor(obs_flat, dtype=torch.float32, device=device).unsqueeze(0)
+            use_random = rng.rand() < float(args.random_action_prob)
+            if use_random:
+                # 引入随机动作，打破“只在专家轨迹附近”的分布
+                a = int(rng.randint(low=0, high=act_dim))
+            elif args.random_only:
+                # 纯随机采样
+                a = int(rng.randint(low=0, high=act_dim))
+            elif args.sample_actions:
+                obs_flat = flatten_obs(obs)
+                # PyTorch 的模型永远默认输入是成批处理的,所以要加unsqueeze0，前面加一个批次维度
+                obs_t = torch.tensor(obs_flat, dtype=torch.float32, device=device).unsqueeze(0)
 
-            # 让 PPO 去环境里跑 200 局，把它的所见所闻（State, Action, Reward）录制下来，保存成 .npz 文件
-            with torch.no_grad():
-                # logits：这是模型的输出结果，通常是未归一化的动作分数
-                # _v：这是 PPO 模型的“价值头（Value Head）”输出，预测当前局势能拿多少分
-                logits, _v = model(obs_t)
-
-            if args.sample_actions:
+                # 让 PPO 去环境里跑 200 局，把它的所见所闻（State, Action, Reward）录制下来，保存成 .npz 文件
+                with torch.no_grad():
+                    # logits：这是模型的输出结果，通常是未归一化的动作分数
+                    # _v：这是 PPO 模型的“价值头（Value Head）”输出，预测当前局势能拿多少分
+                    logits, _v = model(obs_t)
                 # 给 DecisionTransformer 容错机会：DecisionTransformer 学习采样出的数据，能看到“如果稍微走偏了一点，后面怎么救回来”。
                 # Categorical 返回的是一个概率分布对象，而不是单纯的数值。
                 # 你可以把它想象成一个抽奖箱
@@ -164,6 +188,11 @@ def main() -> None:
                 dist = Categorical(logits=logits)
                 a = int(dist.sample().item())
             else:
+                obs_flat = flatten_obs(obs)
+                obs_t = torch.tensor(obs_flat, dtype=torch.float32, device=device).unsqueeze(0)
+
+                with torch.no_grad():
+                    logits, _v = model(obs_t)
                 a = int(torch.argmax(logits, dim=-1).item())
             
             # 记录每一帧的动作，放入缓冲区buffer
@@ -213,7 +242,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
 
 

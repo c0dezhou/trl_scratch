@@ -35,6 +35,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--horizon", type=int, default=25)
     p.add_argument("--num_samples", type=int, default=1024)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--state_cost_coef", type=float, default=None)
     return p.parse_args()
 
 
@@ -77,6 +78,11 @@ def main() -> None:
         done_threshold=float(cfg.get("mpc_done_threshold", 0.5)),
         gamma=float(cfg.get("mpc_gamma", 1.0)),
         seed=int(args.seed),
+        state_cost_coef=float(
+            cfg.get("mpc_state_cost_coef", 1.0)
+            if args.state_cost_coef is None
+            else args.state_cost_coef
+        ),
     )
 
     K = int(cfg["context_len"])

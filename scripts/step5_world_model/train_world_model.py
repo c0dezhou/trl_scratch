@@ -117,6 +117,9 @@ def main():
     opt = torch.optim.AdamW(model.parameters(), lr=float(cfg.lr), weight_decay=float(cfg.weight_decay))
     bce = torch.nn.BCEWithLogitsLoss(reduction="none")
     mse = torch.nn.MSELoss(reduction="none")
+    rollout_steps = int(getattr(cfg, "rollout_steps", 1))
+    rollout_coef = float(getattr(cfg, "rollout_coef", 0.0))
+    rollout_enabled = rollout_steps > 1 and rollout_coef > 0.0
 
     ckpt_last = f"checkpoints/{cfg.run_name}_last.pt"
     ckpt_best = f"checkpoints/{cfg.run_name}_best.pt"
@@ -151,18 +154,74 @@ def main():
 
             loss = delta_loss + float(cfg.done_coef) * done_loss
 
+            rollout_delta_loss = torch.tensor(0.0, device=device)
+            rollout_done_loss = torch.tensor(0.0, device=device)
+            if rollout_enabled:
+                max_roll = min(rollout_steps, states.shape[1] - 1)
+                states_roll = states
+
+                roll_delta_sum = torch.zeros((), device=device)
+                roll_done_sum = torch.zeros((), device=device)
+                roll_trans_cnt = torch.zeros((), device=device)
+                roll_done_cnt = torch.zeros((), device=device)
+
+                for step in range(max_roll):
+                    out_roll = model(states_roll, actions, timesteps, valid)
+                    delta_pred = out_roll.delta[:, step, :]
+                    done_pred = out_roll.done_logits[:, step]
+
+                    v_step = (valid[:, step] > 0).float()
+                    tv_step = (trans_valid[:, step] > 0).float() * v_step
+
+                    # update next state with prediction (no in-place on states_roll)
+                    next_state = states_roll[:, step, :] + delta_pred
+                    next_states_roll = states_roll.clone()
+                    next_states_roll[:, step + 1, :] = torch.where(
+                        tv_step.unsqueeze(-1) > 0,
+                        next_state,
+                        next_states_roll[:, step + 1, :],
+                    )
+                    states_roll = next_states_roll
+
+                    # skip step 0 to avoid double-counting one-step loss
+                    if step == 0:
+                        continue
+
+                    delta_err = (delta_pred - delta_tgt[:, step, :]) ** 2
+                    roll_delta_sum += (delta_err.mean(dim=-1) * tv_step).sum()
+                    roll_trans_cnt += tv_step.sum()
+
+                    done_err = bce(done_pred, done_tgt[:, step])
+                    roll_done_sum += (done_err * v_step).sum()
+                    roll_done_cnt += v_step.sum()
+
+                rollout_delta_loss = roll_delta_sum / (roll_trans_cnt + 1e-6)
+                rollout_done_loss = roll_done_sum / (roll_done_cnt + 1e-6)
+                rollout_loss = rollout_delta_loss + float(cfg.done_coef) * rollout_done_loss
+                loss = loss + rollout_coef * rollout_loss
+
             opt.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), float(cfg.grad_clip))
             opt.step()
 
             if it % int(cfg.log_every) == 0:
-                print(
-                    f"[train] it={it:6d} "
-                    f"loss={loss.item():.6f} "
-                    f"delta={delta_loss.item():.6f} "
-                    f"done={done_loss.item():.6f}"
-                )
+                if rollout_enabled:
+                    print(
+                        f"[train] it={it:6d} "
+                        f"loss={loss.item():.6f} "
+                        f"delta={delta_loss.item():.6f} "
+                        f"done={done_loss.item():.6f} "
+                        f"roll_delta={rollout_delta_loss.item():.6f} "
+                        f"roll_done={rollout_done_loss.item():.6f}"
+                    )
+                else:
+                    print(
+                        f"[train] it={it:6d} "
+                        f"loss={loss.item():.6f} "
+                        f"delta={delta_loss.item():.6f} "
+                        f"done={done_loss.item():.6f}"
+                    )
 
             if it % int(cfg.eval_every) == 0:
                 metrics = evaluate(model, val_loader, done_coef=float(cfg.done_coef))
