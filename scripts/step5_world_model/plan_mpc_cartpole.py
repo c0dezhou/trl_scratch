@@ -31,6 +31,7 @@ from model_based.mpc import MPCConfig, mpc_action
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--ckpt", type=str, required=True)
+    p.add_argument("--device", type=str, default=None, help="cpu/cuda/mps; default auto")
     p.add_argument("--episodes", type=int, default=10)
     p.add_argument("--horizon", type=int, default=25)
     p.add_argument("--num_samples", type=int, default=1024)
@@ -41,7 +42,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    device = get_device("cuda")
+    device = get_device(args.device)
 
     pack = torch.load(args.ckpt, map_location=device, weights_only=False)
     cfg = pack["cfg"]

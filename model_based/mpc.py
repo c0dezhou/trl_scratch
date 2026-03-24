@@ -20,12 +20,10 @@ class MPCConfig:
     # reward shaping for CartPole: penalize |x| and |theta| (normalized space)
     state_cost_coef: float = 1.0
 
-# 1. 补齐缺失的记忆 左补齐
-# offline用右对齐， online用左对齐
-def _pad_left(arr: np.ndarray, K: int, pad_value: float = 0.0):
-    """为什么要左补齐？ Transformer 的 K 是固定的（窗口大小）。
-    如果游戏刚开始，历史数据只有 3 步，我们要把这 3 步放在窗口的最右侧，左边补 0。
-    逻辑：保持“现在”永远在索引 K-1 的位置，这样模型处理起来逻辑最统一。"""
+# 1. 补齐缺失的记忆：右补齐（与训练数据一致）
+# 训练集窗口是“左对齐 + 右侧 padding”，MPC 在线也应保持同分布，避免位置编码错位。
+def _pad_right(arr: np.ndarray, K: int, pad_value: float = 0.0):
+    """右补齐：有效序列在左侧，padding 在右侧。"""
     L = arr.shape[0]
     if L >= K:
         return arr[-K:]
@@ -36,7 +34,7 @@ def _pad_left(arr: np.ndarray, K: int, pad_value: float = 0.0):
     pad_shape = (K-L,)+arr.shape[1:] # 构造出一个完整的“填充块”的形状，
     # 这个块的宽度（特征数）和原来一模一样，但高度（长度）是欠缺的那部分
     pad = np.full(pad_shape, pad_value, dtype=arr.dtype)
-    return np.concatenate([pad, arr], axis = 0)
+    return np.concatenate([arr, pad], axis=0)
 
 @torch.no_grad()
 def mpc_action(
@@ -61,15 +59,15 @@ def mpc_action(
     # 归一化历史状态 zscore
     s_norm = (obs_hist_raw.astype(np.float32) - state_mean.astype(np.float32)) / state_std.astype(np.float32)
 
-    # 左补齐到固定长度 K
-    s_pad = _pad_left(s_norm, K, pad_value=0.0)                 # (K,D)
-    a_pad = _pad_left(act_hist.astype(np.int64), K, pad_value=0) # (K,)
-    t_pad = _pad_left(t_hist.astype(np.int64), K, pad_value=0)   # (K,)
+    # 右补齐到固定长度 K（与训练一致）
+    s_pad = _pad_right(s_norm, K, pad_value=0.0)                 # (K,D)
+    a_pad = _pad_right(act_hist.astype(np.int64), K, pad_value=0) # (K,)
+    t_pad = _pad_right(t_hist.astype(np.int64), K, pad_value=0)   # (K,)
 
     valid_len = min(obs_hist_raw.shape[0], K)  # 计算实际有效的帧数
     valid = np.zeros((K,), dtype=np.float32)
-    # 右对齐 valid（当前时刻在最右侧），与 _pad_left 保持一致
-    valid[K - valid_len :] = 1.0
+    # 左对齐 valid（当前时刻在最右侧的真实位置 valid_len-1）
+    valid[:valid_len] = 1.0
 
     N = int(cfg.num_samples) # 平行宇宙的数量，通常是 1024
     H = int(cfg.horizon) # 脑内向未来模拟的步数，通常是 25
@@ -87,7 +85,9 @@ def mpc_action(
     # 生成动作候选
     # sample action sequences
     g = torch.Generator(device=device)
-    g.manual_seed(int(cfg.seed))
+    # 用当前时间步扰动 seed，避免每次调用都采到完全同一批候选动作
+    seed_offset = int(t_pad[min(valid_len - 1, K - 1)]) if valid_len > 0 else 0
+    g.manual_seed(int(cfg.seed) + seed_offset)
     # 在 0 到 act_dim-1 之间随机生成整数
     cand = torch.randint(low=0, high=act_dim, size=(N, H), generator=g, device=device)  # (N,H)
 
@@ -97,10 +97,9 @@ def mpc_action(
     scores = torch.zeros((N,), device=device, dtype=torch.float32)
     alive = torch.ones((N,), device=device, dtype=torch.float32)
 
-    # 定位“当下”：last_idx = K - 1
-    # 因为在输入前做了 _pad_left，所以**当前的观测（Current Observation）**永远被推到了数组的最右端4
-    # 在接下来的循环里，我们要把 cand 里的第 1 个预测动作填进去。填在哪？就填在 last_idx 这个位置，也就是紧跟着当前观测的地方
-    last_idx = K - 1
+    # 当前有效长度（<=K）。当前观测在 index = valid_len - 1
+    cur_len = valid_len
+    last_idx = cur_len - 1
 
     # 对每条候选动作序列 cand[i, 0:H]，拿模型在“想象里”往前滚 H 步，
     # 算这条序列的预期总收益 scores[i]，最后挑分数最高的那条，返回它的第一个动作
@@ -125,16 +124,26 @@ def mpc_action(
         dead = (done_prob >= cfg.done_threshold).float()
         alive = alive * (1.0 - dead)
 
-        # 窗口左移一格，把 next_state 塞到末尾
-        states = torch.roll(states, shifts=-1, dims=1)
-        actions = torch.roll(actions, shifts=-1, dims=1)
-        timesteps = torch.roll(timesteps, shifts=-1, dims=1)
-        valid_t = torch.roll(valid_t, shifts=-1, dims=1)
+        # 追加下一步状态；未满 K 时直接 append，满 K 后滑窗
+        if cur_len < K:
+            states[:, cur_len, :] = next_state
+            actions[:, cur_len] = 0  # placeholder, next step will overwrite
+            timesteps[:, cur_len] = (timesteps[:, last_idx] + 1).clamp(max=model.max_timestep - 1)
+            valid_t[:, cur_len] = 1.0
+            last_idx = cur_len
+            cur_len += 1
+        else:
+            # 窗口左移一格，把 next_state 塞到末尾
+            states = torch.roll(states, shifts=-1, dims=1)
+            actions = torch.roll(actions, shifts=-1, dims=1)
+            timesteps = torch.roll(timesteps, shifts=-1, dims=1)
+            valid_t = torch.roll(valid_t, shifts=-1, dims=1)
 
-        states[:, -1, :] = next_state
-        actions[:, -1] = 0  # placeholder, next step will overwrite
-        timesteps[:, -1] = (timesteps[:, -2] + 1).clamp(max=model.max_timestep - 1)
-        valid_t[:, -1] = 1.0
+            states[:, -1, :] = next_state
+            actions[:, -1] = 0  # placeholder, next step will overwrite
+            timesteps[:, -1] = (timesteps[:, -2] + 1).clamp(max=model.max_timestep - 1)
+            valid_t[:, -1] = 1.0
+            last_idx = K - 1
 
     # 最后选最好的候选序列，返回第一步动作
     best = int(torch.argmax(scores).item())

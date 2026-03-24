@@ -23,13 +23,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--ckpt", type=str, required=True)
     # python -m scripts.xxx --ckpt checkpoints/xxx.pt --batch_size 256
     p.add_argument("--batch_size", type=int, default=256)
+    p.add_argument("--device", type=str, default=None, help="cpu/cuda/mps; default auto")
     return p.parse_args()
 
 
 @torch.no_grad()
 def main() -> None:
     args = parse_args()
-    device = get_device("cuda")
+    device = get_device(args.device)
 
     # PyTorch 2.6+ 默认 weights_only=True(限制反序列化的对象类型)，ckpt 里有 numpy array 时会报错
     # 训练的 ckpt 可以安全用 weights_only=False

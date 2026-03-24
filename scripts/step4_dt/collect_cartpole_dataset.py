@@ -76,10 +76,11 @@ def build_policy_model(cfg, obs0: np.ndarray, act_dim: int) -> torch.nn.Module:
     
     # MLP 接受的是拍扁后的总维度
     flat_dim = int(flatten_obs(obs0).shape[0])
+    hidden = int(getattr(cfg, "hidden", getattr(cfg, "hidden_dim", 128)))
     return ActorCriticMLP(
         obs_dim=flat_dim,
         act_dim=act_dim,
-        hidden=int(getattr(cfg, "hidden_dim", 128)),
+        hidden=hidden,
     )
 
 def main() -> None:
@@ -242,5 +243,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
