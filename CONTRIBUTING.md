@@ -1,7 +1,10 @@
 # Contributing
 
 ## Branch naming
-Use `feature/*`, `fix/*`, or `practice/*`.
+Use:
+- `feature/*` for new features
+- `fix/*` for bug fixes
+- `practice/*` for Git workflow exercises
 
 ## Commit style
 Use small and clear commits.
